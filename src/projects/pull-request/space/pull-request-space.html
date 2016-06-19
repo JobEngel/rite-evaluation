@@ -26,7 +26,11 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -->
+<link rel="import" href="snap.html">
 <link rel="import" href="pull-request-space-card.html">
+<link rel="import" href="svg-arrow.html">
+<link rel="import" href="vector-behavior.html">
+<link rel="import" href="pan-zoom-viewport.html">
 
 <dom-module id="pull-request-space">
   <template>
@@ -37,20 +41,31 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       [hidden] {
         display: none !important;
       }
-      #container {
-        height: 100%;
-        width: 100%;
-        position: relative;
+      svg {
+        -webkit-box-shadow: 0 0 8px 0 rgba(0,0,0,0.25);
+        box-shadow: 0 0 8px 0 rgba(0,0,0,0.25);
+        background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTgiIGhlaWdodD0iNTgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI1OCIgaGVpZ2h0PSI1OCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAwIDE0LjUgTCA1OCAxNC41IE0gMTQuNSAwIEwgMTQuNSA1OCBNIDAgMjkgTCA1OCAyOSBNIDI5IDAgTCAyOSA1OCBNIDAgNDMuNSBMIDU4IDQzLjUgTSA0My41IDAgTCA0My41IDU4IiBmaWxsPSJub25lIiBzdHJva2U9IiNlMGUwZTAiIG9wYWNpdHk9IjAuMiIgc3Ryb2tlLXdpZHRoPSIxIi8+PHBhdGggZD0iTSA1OCAwIEwgMCAwIDAgNTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2UwZTBlMCIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+');
+        background-color: white;
       }
-      canvas {
-        position: absolute;
+
+      line.ghost {
+        stroke: var(--anchor-color);
+        stroke-dasharray: 10,5;
+        stroke-width: 3;
       }
+
     </style>
-      <canvas id="canvas"></canvas>
+    <pan-zoom-viewport id="viewport">
+      <svg id="svg">
+        <!-- <path d="M 10 300 L 100 400" fill="none" stroke="#000000" stroke-width="1.45" stroke-miterlimit="10"></path> -->
+      </svg>
       <div id="container"></div>
+    </pan-zoom-viewport>
   </template>
   <script>
+  /*global VectorBehavior*/
     Polymer({
+      behaviors: [VectorBehavior],
       is: 'pull-request-space',
       properties: {
         groups: {
@@ -62,7 +77,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
           value: function() {
             return [];
           }
-        }
+        },
+        _arrows: {
+          type: Array,
+          value: function() {
+            return [];
+          }
+        },
+        _snap: Object,
+        _ghostLine: Object
       },
       get canvas() {
         return this.$.canvas;
@@ -75,39 +98,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       },
       listeners: {
         'card-tracking': '_handleCardTracking',
-        'linked-from-or-to': '_maybeCreateLink'
+        'link-start': '_maybeCreateLink'
       },
       attached: function() {
-        this.updateAfterResize();
-        this._updateMousePosition = this._updateMousePosition.bind(this);
-        this.updateAfterResize = this.updateAfterResize.bind(this);
-        this._recalcCanvas = this._recalcCanvas.bind(this);
+        this._updateElemTrackingPosition = this._throttle(60, this._updateElemTrackingPosition.bind(this));
+        this._updateMousePosition = this._throttle(60, this._updateMousePosition.bind(this));
         this._maybeCancelLinking = this._maybeCancelLinking.bind(this);
 
-        window.addEventListener('resize', this.updateAfterResize);
-
-        setInterval(this._recalcCanvas, 1000 / 60);
+        this._snap = Snap(this.$.svg);
       },
-      updateAfterResize: (function() {
-        var wait = false;
 
-        return function() {
-          if (!this.isAttached || wait) {
-            return;
-          }
-          var rect = this.containerRect;
-          this._blocks.forEach(function(block) {
-            this._updateElemTrackingPosition(rect, block, 0, 0, 0);
-          }.bind(this));
-
-          this._recalcCanvas(true);
-
-          wait = true;
-          setTimeout(function() {
-            wait = false;
-          }, 1000 / 10);
-        }
-      })(),
       _createBlocks: function(groups) {
         this._blocks = [];
         var container = this.$.container;
@@ -129,15 +129,20 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       // New functions to make sure we can remove the listener later to
       // preserve memory
       _updateMousePosition: function updateMousePosition(e) {
+        if (!this._ghostLine) {
+          this._ghostLine = this._snap.line(e.clientX,e.clientY,e.clientX,e.clientY).attr({class: 'ghost'});
+        }
+        var mousePosOnCanvas = this.$.viewport.clientToCanvasPosition(e);
+        console.log(mousePosOnCanvas);
+        this._ghostLine.x2 = e.clientX;
+        this._ghostLine.y2 = e.clientY;
         this._mouseX = e.clientX;
         this._mouseY = e.clientY;
-        this._recalcCanvas(true);
       },
       _maybeCancelLinking: function(e) {
         // Escape key
         if (e.keyCode === 27) {
           delete this._previousCard;
-          this._recalcCanvas(true);
         }
       },
       _createLink: function(card) {
@@ -153,7 +158,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
         delete this._previousCard;
         window.removeEventListener('mousemove', this._updateMousePosition);
         window.removeEventListener('keydown', this._maybeCancelLinking);
-        this._recalcCanvas(true);
       },
       _maybeCreateLink: function(e) {
         var card = e.detail;
@@ -229,113 +233,52 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
           toY: points.leftY
         };
       },
-      _drawArrow: function(ctx, coordinates) {
-        var fromX = coordinates.fromX,
-            fromY = coordinates.fromY,
-            toX   = coordinates.toX,
-            toY   = coordinates.toY;
-        ctx.beginPath();
-        ctx.moveTo(fromX, fromY);
-        ctx.lineTo(toX, toY);
 
-        // Draw the arrow point
-        // http://stackoverflow.com/a/6333775/2761676
-        var angle = Math.atan2(toY - fromY, toX - fromX);
-        ctx.moveTo(toX, toY);
-        ctx.lineTo(toX - 10 * Math.cos(angle - Math.PI / 6), toY - 10 * Math.sin(angle - Math.PI / 6));
-        ctx.moveTo(toX, toY);
-        ctx.lineTo(toX - 10 * Math.cos(angle + Math.PI / 6), toY - 10 * Math.sin(angle + Math.PI / 6));
-
-        ctx.closePath();
-        ctx.stroke();
+      _updateElemTrackingPosition: function(lastElem, originalPosition, e) {
+        var delta = this.toVector(e, 'dx', 'dy');
+        var elemSize = this.toVector(lastElem.getBoundingClientRect(), 'width', 'height');
+        var newPos = this.add(originalPosition, delta)
+        var clippedPos = this.clipBox(
+          newPos,
+          elemSize,
+          this.nullVector,
+          this.constVector(1500));
+        lastElem.style.left = clippedPos.x + 'px';
+        lastElem.style.top  = clippedPos.y + 'px';
       },
-      // Recalc the canvas if we are currently dragging
-      _recalcCanvas: function(forced) {
-        if (this.dragging || forced) {
-          // Update the width and height in case the frame was not calculated
-          // yet on stamping, or the window was resized.
-          var containerRect = this.containerRect;
-          this.canvas.width = containerRect.width;
-          this.canvas.height = containerRect.height;
-          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-          for (var i=0, l=this._blocks.length;i<l;i++) {
-            var fromBlock = this._blocks[i];
-            var fromRect = fromBlock.getBoundingClientRect();
+      _throttle: function(fps, callback) {
+        var wait = false;
 
-            for (var j=0, c=fromBlock.connections.length; j<c;j++) {
-              var connection = fromBlock.connections[j];
-              var toRect = this._blocks[connection.id].getBoundingClientRect();
-
-              var coordinates = this._calculateCoordinates(containerRect, fromRect, toRect);
-
-              this._drawArrow(this.ctx, coordinates);
-            }
+        return function() {
+          if (!this.isAttached || wait) {
+            return;
           }
+          callback.apply(null, arguments);
 
-          // We are currently creating a new connection
-          if (this._previousCard) {
-            this._drawArrowToMousePosition(containerRect);
-          }
+          wait = true;
+          setTimeout(function() {
+            wait = false;
+          }, 1000 / fps);
         }
       },
-      _drawArrowToMousePosition: function(containerRect) {
-        var fromRect = this._previousCard.getBoundingClientRect();
-        var coordinates = this._calculateCoordinates(containerRect, fromRect, {
-          top: this._mouseY,
-          bottom: this._mouseY,
-          left: this._mouseX,
-          right: this._mouseX,
-          width: 1,
-          height: 1
-        });
-        this._drawArrow(this.ctx, coordinates);
-      },
-      _updateElemTrackingPosition: function(rect, lastElem, dy, dx) {
-        // Position the element to the new y position based on its original
-        // position, the delta from the original position.
-        //
-        // The position is bounded to the container rectangle
-        var newTop = lastElem._originalPosition.top + dy;
-        var bottomBoundary = rect.bottom - lastElem._originalPosition.height;
-        var topBoundedToBottom = Math.min(newTop, bottomBoundary);
-        var topBoundedtoYAndBottom = Math.max(rect.top, topBoundedToBottom) - rect.top;
-        lastElem.style.top = topBoundedtoYAndBottom + 'px';
 
-        // Same for the x position as pointed out above
-        var newLeft = lastElem._originalPosition.left + dx;
-        var rightBoundary = rect.right - lastElem._originalPosition.width;
-        var leftBoundedtoRight = Math.min(newLeft, rightBoundary);
-        var leftBoundedToLeftAndRight = Math.max(rect.left, leftBoundedtoRight) - rect.left;
-        lastElem.style.left = leftBoundedToLeftAndRight + 'px';
-      },
       _handleCardTracking: (function() {
-        var lastElem, rect;
+        var lastElem, originalPosition;
 
         return function(e) {
           var event = e.detail.event;
-          switch (event.state) {
-            case 'start':
-              var elem = e.detail.card;
-              elem._originalPosition = elem.getBoundingClientRect();
-              rect = this.containerRect;
-
-              elem.style.zIndex = 5;
-              lastElem = elem;
-              this.dragging = true;
-
-              break;
-
-            case 'track':
-              this._updateElemTrackingPosition(rect, lastElem, event.dy, event.dx);
-              break;
-
-            case 'end':
-              lastElem.style.zIndex = 0;
-              lastElem = undefined;
-              this.dragging = false;
-
-              break;
+          var vp = this.$.viewport;
+          if (event.state === 'start') {
+            lastElem = e.detail.elem;
+            originalPosition = vp.clientToCanvasPosition(this.toVector(lastElem.getBoundingClientRect()));
+            lastElem.style.zIndex = 5;
+          } else if (event.state === 'track') {
+            this._updateElemTrackingPosition(lastElem, originalPosition, event);
+          } else if (event.state === 'end') {
+            lastElem.style.zIndex = 0;
+            lastElem = undefined;
+            originalPosition = undefined;
           }
         }
       })()

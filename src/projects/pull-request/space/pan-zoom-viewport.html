@@ -1,0 +1,159 @@
+<!-- Copyright (c) 2016, preview-code
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of rite-evaluation nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-->
+<link rel="import" href="vector-behavior.html">
+
+<dom-module id="pan-zoom-viewport">,
+  <template>
+    <style>
+      :host {
+        display: block;
+        height: 100%;
+        width: 100%;
+      }
+      .actions {
+        position: relative;
+        float: right;
+        top: -200px;
+        right: 2em;
+      }
+      .actions * {
+        margin: 1em;
+        --paper-fab-background: var(--primary-background-color);
+        --paper-fab-keyboard-focus-background: var(--primary-background-color);
+        --paper-fab-iron-icon: {
+          fill: var(--secondary-text-color);
+        };
+      }
+      #grid {
+        padding: 250px;
+      }
+      #grid, ::content > * {
+        position: absolute;
+        width: 1500px;
+        height: 1500px;
+      }
+      #viewport {
+        zoom: var(--zoom, 1);
+        position: relative;
+        height: 100%;
+        width: 100%;
+        overflow: scroll;
+      }
+    </style>
+
+    <div id="viewport">
+      <div id="grid">
+        <content></content>
+      </div>
+    </div>
+
+    <div class="actions">
+      <paper-fab icon="icons:add" on-tap="_zoomIn" title="Zoom in"></paper-fab>
+      <paper-fab icon="icons:remove" on-tap="_zoomOut" title="Zoom out"></paper-fab>
+    </div>
+
+  </template>
+  <script>
+  /*global VectorBehavior*/
+    Polymer({
+      behaviors: [VectorBehavior],
+      is: 'pan-zoom-viewport',
+      properties: {
+        zoom: {
+          type: Number,
+          value: 1,
+          observer: '_setZoom'
+        },
+      },
+
+      attached: function() {
+        this.$.viewport.addEventListener('mousedown', this._maybeStartPan.bind(this));
+        // setTimeout(function() { this._centerViewportToCanvas() }.bind(this), 1000);
+      },
+
+      clientToCanvasPosition: function(positionVect) {
+        var gridPos = this.toVector(this.$.grid.getBoundingClientRect());
+        var canvasPos = this.add(gridPos, this.constVector(250));
+        return this.subtract(positionVect, canvasPos);
+      },
+
+      scrollViewportTo: function(viewportPosition) {
+        this.$.viewport.scrollLeft = Math.max(0, viewportPosition.x);
+        this.$.viewport.scrollTop = Math.max(0, viewportPosition.y);
+      },
+
+      getCanvasSize: function() {
+        return this.constVector(1500);
+      }
+
+      _maybeStartPan: function(e) {
+        // Pan on middle mouse drag
+        if (e.button === 1) {
+          var startPos = this.toVector(e);
+          var currentPan = this.toVector(this.$.viewport, 'scrollLeft', 'scrollTop');
+          var pan = this._pan(startPos, currentPan).bind(this);
+          window.addEventListener('mousemove', pan);
+          window.addEventListener('mouseup', function() {
+            window.removeEventListener('mousemove', pan);
+          }.bind(this));
+        }
+      },
+      _pan: function(startPos, currentPan) {
+        return function(e) {
+          var delta = this.subtract(startPos, this.toVector(e));
+          var newPan = this.add(currentPan, delta);
+          this.scrollViewportTo(newPan);
+        }
+      },
+      _zoomIn: function() {
+        this.zoom += 0.15;
+      },
+      _zoomOut: function() {
+        this.zoom -= 0.15;
+      },
+      _setZoom: function(s) {
+        var currentPan = this.toVector(this.$.viewport, 'scrollLeft', 'scrollTop');
+        var viewportSize = this.toVector(this.$.viewport.getBoundingClientRect(), 'width', 'height');
+        var viewportCenter = this.add(currentPan, this.scale(0.5, viewportSize));
+
+        this.customStyle['--zoom'] = '' + s;
+        this.updateStyles();
+
+        this.scrollViewportTo(currentPan);
+      },
+
+      _centerViewportToCanvas: function() {
+        var viewportSize = this.toVector(this.$.viewport.getBoundingClientRect(), 'width', 'height');
+        var gridSize = this.toVector(this.$.grid.getBoundingClientRect(), 'width', 'height');
+        var center = this.scale(0.5, this.subtract(gridSize, viewportSize));
+        this.scrollViewportTo(center);
+      },
+    });
+  </script>
+</dom-module>

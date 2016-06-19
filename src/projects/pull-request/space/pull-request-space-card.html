@@ -135,12 +135,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       },
       _throwCardTracking: function(e) {
         this.fire('card-tracking', {
-          card: this,
+          elem: this,
           event: e.detail
         });
       },
       _linkFromOrTo: function() {
-        this.fire('linked-from-or-to', this);
+        this.fire('link-start', this);
       },
       _jumpToHunk: function(e) {
         this.fire('jump-to-hunk', {
